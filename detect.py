@@ -16,6 +16,7 @@ from utils.torch_utils import select_device, load_classifier, time_synchronized,
 
 
 def detect(save_img=False):
+    global index
     source, weights, view_img, save_txt, imgsz, trace = opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size, not opt.no_trace
     save_img = not opt.nosave and not source.endswith('.txt')  # save inference images
     webcam = source.isnumeric() or source.endswith('.txt') or source.lower().startswith(
@@ -75,7 +76,8 @@ def detect(save_img=False):
             img = img.unsqueeze(0)
 
         # Warmup
-        if device.type != 'cpu' and (old_img_b != img.shape[0] or old_img_h != img.shape[2] or old_img_w != img.shape[3]):
+        if device.type != 'cpu' and (
+                old_img_b != img.shape[0] or old_img_h != img.shape[2] or old_img_w != img.shape[3]):
             old_img_b = img.shape[0]
             old_img_h = img.shape[2]
             old_img_w = img.shape[3]
@@ -84,7 +86,7 @@ def detect(save_img=False):
 
         # Inference
         t1 = time_synchronized()
-        with torch.no_grad():   # Calculating gradients would cause a GPU memory leak
+        with torch.no_grad():  # Calculating gradients would cause a GPU memory leak
             pred = model(img, augment=opt.augment)[0]
         t2 = time_synchronized()
 
@@ -116,17 +118,72 @@ def detect(save_img=False):
                     n = (det[:, -1] == c).sum()  # detections per class
                     s += f"{n} {names[int(c)]}{'s' * (n > 1)}, "  # add to string
 
+                # set line
+                line_coordinate = [400, 680, 1200, 680]
+                offset = 10
+                plot_one_box(line_coordinate, im0, label='Line', color=colors[5], line_thickness=1)
+
                 # Write results
                 for *xyxy, conf, cls in reversed(det):
                     if save_txt:  # Write to file
                         xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
+                        # print("---------------")
+                        # print(xywh)
+                        # print("---------------")
                         line = (cls, *xywh, conf) if opt.save_conf else (cls, *xywh)  # label format
                         with open(txt_path + '.txt', 'a') as f:
                             f.write(('%g ' * len(line)).rstrip() % line + '\n')
 
                     if save_img or view_img:  # Add bbox to image
                         label = f'{names[int(cls)]} {conf:.2f}'
-                        plot_one_box(xyxy, im0, label=label, color=colors[int(cls)], line_thickness=1)
+                        xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4))).view(-1).tolist()
+                        # print("---------------")
+                        # print(xywh)
+                        # print("---------------")
+                        # print(torch.tensor(xyxy).view(1, 4).view(-1).tolist())
+                        # print("---------------")
+                        xyxy = torch.tensor(xyxy).view(1, 4).view(-1).tolist()
+                        # plot_one_box(xyxy, im0, label=label, color=colors[int(cls)], line_thickness=1)
+                        plot_one_box(torch.tensor(xyxy).view(1, 4).view(-1).tolist(), im0, label=label,
+                                     color=colors[int(cls) + 1], line_thickness=1)
+                        # plot_one_box([xywh[0] - 0.5 * xywh[2], xywh[1] - 0.5 * xywh[3], xywh[0] + 0.5 * xywh[2],
+                        #               xywh[1] + 0.5 * xywh[3]], im0, label=label, color=colors[int(cls) + 2],
+                        #              line_thickness=1)
+
+                        # 获取坐标 torch.tensor(xyxy).view(1, 4).view(-1).tolist()
+                        # xywh is the center coordinate, and w is width, h is height
+                        # xyxy is x1y1x2y2, x1y1 is the left-up coordinate and x2y2 is the right-down coordinate.
+
+                        # we get the coordinate, we can set the coordinate of new line, then do comparsion.
+                        # plot_one_box([143.0, 145, 298.0, 150], im0, label='Line', color=colors[int(cls)+5], line_thickness=1)
+
+                        x1, y1, x2, y2 = xyxy
+                        print("---------------")
+                        print(x1, y1, x2, y2)
+                        print("---------------")
+                        if x2 <= 795 and line_coordinate[0] <= x2 <= line_coordinate[2] and line_coordinate[
+                            1] - offset <= y2 <= \
+                                line_coordinate[1]:
+                            # if (line_coordinate[0] <= x1 <= line_coordinate[2] and line_coordinate[1] - offset <= y1 <=
+                            #     line_coordinate[1]) or (
+                            #         line_coordinate[0] <= x2 <= line_coordinate[2] and line_coordinate[1] - offset <= y2 <=
+                            #         line_coordinate[1]):
+                            print("过线触发！")
+                            cv2.putText(im0, "Trigger", (300, 620), 0, 1, [0, 0, 255], thickness=1,
+                                        lineType=cv2.LINE_AA)
+                            string = str(index) + '.jpg'
+                            cv2.imwrite(str(save_dir / string), im0)
+                            index += 1
+
+                        elif x1 >= 795 and line_coordinate[0] <= x1 <= line_coordinate[2] and line_coordinate[
+                            1] - offset <= y1 <= line_coordinate[1]:
+                            print("过线触发！")
+                            cv2.putText(im0, "Trigger", (300, 620), 0, 1, [0, 0, 255], thickness=1,
+                                        lineType=cv2.LINE_AA)
+
+                            string = str(index) + '.jpg'
+                            cv2.imwrite(str(save_dir / string), im0)
+                            index += 1
 
             # Print time (inference + NMS)
             print(f'{s}Done. ({(1E3 * (t2 - t1)):.1f}ms) Inference, ({(1E3 * (t3 - t2)):.1f}ms) NMS')
@@ -135,7 +192,11 @@ def detect(save_img=False):
             if view_img:
                 cv2.imshow(str(p), im0)
                 cv2.waitKey(1)  # 1 millisecond
-
+            # print("---------------")
+            # print(im0)
+            # print(im0.shape[1])
+            # print(im0.shape[0])
+            # print("---------------")
             # Save results (image with detections)
             if save_img:
                 if dataset.mode == 'image':
@@ -158,7 +219,7 @@ def detect(save_img=False):
 
     if save_txt or save_img:
         s = f"\n{len(list(save_dir.glob('labels/*.txt')))} labels saved to {save_dir / 'labels'}" if save_txt else ''
-        #print(f"Results saved to {save_dir}{s}")
+        # print(f"Results saved to {save_dir}{s}")
 
     print(f'Done. ({time.time() - t0:.3f}s)')
 
@@ -168,8 +229,8 @@ if __name__ == '__main__':
     parser.add_argument('--weights', nargs='+', type=str, default='yolov7.pt', help='model.pt path(s)')
     parser.add_argument('--source', type=str, default='inference/images', help='source')  # file/folder, 0 for webcam
     parser.add_argument('--img-size', type=int, default=640, help='inference size (pixels)')
-    parser.add_argument('--conf-thres', type=float, default=0.25, help='object confidence threshold')
-    parser.add_argument('--iou-thres', type=float, default=0.45, help='IOU threshold for NMS')
+    parser.add_argument('--conf-thres', type=float, default=0.8, help='object confidence threshold')
+    parser.add_argument('--iou-thres', type=float, default=0.2, help='IOU threshold for NMS')
     parser.add_argument('--device', default='', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     parser.add_argument('--view-img', action='store_true', help='display results')
     parser.add_argument('--save-txt', action='store_true', help='save results to *.txt')
@@ -185,8 +246,9 @@ if __name__ == '__main__':
     parser.add_argument('--no-trace', action='store_true', help='don`t trace model')
     opt = parser.parse_args()
     print(opt)
-    #check_requirements(exclude=('pycocotools', 'thop'))
-
+    # check_requirements(exclude=('pycocotools', 'thop'))
+    global index
+    index = 1
     with torch.no_grad():
         if opt.update:  # update all models (to fix SourceChangeWarning)
             for opt.weights in ['yolov7.pt']:
